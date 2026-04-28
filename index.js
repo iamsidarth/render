@@ -45,7 +45,6 @@ function pageShell({ title, body }) {
             radial-gradient(circle at top left, rgba(110, 168, 255, 0.2), transparent 40%),
             radial-gradient(circle at bottom right, rgba(157, 123, 255, 0.15), transparent 40%),
             linear-gradient(160deg, var(--bg), var(--bg2));
-          overflow: hidden;
         }
         body::before {
           content: "";
@@ -61,7 +60,7 @@ function pageShell({ title, body }) {
         }
         .container {
           position: relative;
-          width: min(700px, 90%);
+          width: min(700px, 95%);
           padding: 60px 40px;
           background: var(--panel);
           border: 1px solid var(--panel-border);
@@ -91,23 +90,19 @@ function pageShell({ title, body }) {
           -webkit-background-clip: text;
           -webkit-text-fill-color: transparent;
         }
-        p {
-          color: var(--muted);
-          font-size: 17px;
-          line-height: 1.6;
-          margin-bottom: 40px;
-        }
+        p { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
         .omnibox {
           display: flex;
           gap: 12px;
-          background: rgba(0, 0, 0, 0.2);
+          background: rgba(0, 0, 0, 0.3);
           border: 1px solid rgba(255, 255, 255, 0.1);
-          padding: 8px;
+          padding: 10px;
           border-radius: 20px;
-          transition: border-color 0.3s, box-shadow 0.3s;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         .omnibox:focus-within {
           border-color: var(--accent);
+          background: rgba(0, 0, 0, 0.4);
           box-shadow: 0 0 0 4px rgba(110, 168, 255, 0.15);
         }
         input {
@@ -116,62 +111,58 @@ function pageShell({ title, body }) {
           border: none;
           color: white;
           padding: 12px 16px;
-          font-size: 16px;
+          font-size: 18px;
           outline: none;
         }
-        input::placeholder { color: #5a6b8a; }
         .btn-go {
           background: linear-gradient(135deg, #6ea8ff, #9d7bff);
           color: #08111f;
           border: none;
-          padding: 0 28px;
+          padding: 0 32px;
           border-radius: 14px;
           font-weight: 700;
+          font-size: 16px;
           cursor: pointer;
           transition: transform 0.2s;
         }
-        .btn-go:hover { transform: scale(1.02); }
-        .footer {
-          margin-top: 32px;
-          font-size: 13px;
-          color: #5a6b8a;
-        }
+        .btn-go:hover { transform: scale(1.05); }
+        .footer { margin-top: 32px; font-size: 13px; color: #5a6b8a; }
       </style>
     </head>
     <body>
       <div class="container">
-        <div class="eyebrow">Secure Gateway</div>
-        <h1>Search or Proxy</h1>
-        <p>Type a URL to browse privately, or enter a query to search the web instantly.</p>
+        <div class="eyebrow">Cloud Proxy v2.0</div>
+        <h1>Portal</h1>
+        <p>Enter a URL (e.g. google.com) or a search query.</p>
         
         <form action="/go" method="get" class="omnibox">
           <input 
             type="text" 
             name="q" 
-            placeholder="Search Google or enter https://..." 
+            placeholder="Type here..." 
             autocomplete="off" 
             autofocus 
             required 
           />
           <button type="submit" class="btn-go">Go</button>
         </form>
-
-        <div class="footer">
-          Ready for Render • Powered by Node.js
-        </div>
+        <div class="footer">Streaming & Audio Enabled</div>
       </div>
     </body>
   </html>`;
 }
 
-app.get("/", (req, res) => res.send(pageShell({ title: "Portal" })));
+app.get("/", (req, res) => res.send(pageShell({ title: "Secure Portal" })));
 
 app.get("/go", (req, res) => {
   const query = String(req.query.q || "").trim();
   if (!query) return res.redirect("/");
 
-  // Determine if input is a URL or a Search
-  const isUrl = /^(https?:\/\/)?([\da-z.-]+)\.([a-z.]{2,6})([\/\w .-]*)*\/?(\?.*)?$/.test(query);
+  // IMPROVED DETECTOR: 
+  // 1. Starts with http/https
+  // 2. Contains a dot followed by common TLDs (com, net, org, etc)
+  // 3. Is 'localhost'
+  const isUrl = /^(https?:\/\/)|(localhost)|([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6}(:[0-9]{1,5})?(\/.*)?)$/i.test(query);
 
   if (isUrl) {
     const target = query.startsWith("http") ? query : `https://${query}`;
@@ -191,13 +182,15 @@ app.use("/proxy", (req, res, next) => {
       target: targetUrl.origin,
       changeOrigin: true,
       followRedirects: true,
-      secure: targetUrl.protocol === "https:",
+      secure: false, // Set to false to avoid SSL handshake issues on some older sites
       logLevel: "silent",
       pathRewrite: () => `${targetUrl.pathname}${targetUrl.search}`,
       onProxyRes: (proxyRes) => {
-        // Essential for streaming media/audio correctly
+        // Strip headers that prevent embedding/streaming
         delete proxyRes.headers['content-security-policy'];
         delete proxyRes.headers['x-frame-options'];
+        // Ensure audio/video can stream
+        proxyRes.headers['Access-Control-Allow-Origin'] = '*';
       }
     });
     return proxy(req, res, next);
@@ -207,4 +200,4 @@ app.use("/proxy", (req, res, next) => {
 });
 
 const port = process.env.PORT || 3000;
-app.listen(port, "0.0.0.0", () => console.log(`Active on ${port}`));
+app.listen(port, "0.0.0.0", () => console.log(`Engine Ready on ${port}`));
