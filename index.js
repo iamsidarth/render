@@ -456,36 +456,41 @@ app.get("/", (req, res) => {
 </html>`);
 });
 
-app.use("/p/*", async (req, res) => {
-  const path = req.path.slice(3);
-  const qs = req.url.slice(req.path.length);
-  const target = path + qs;
-  if (!target) return res.redirect("/");
+app.use("/p/", async (req, res) => {
+  let target;
+
+  try {
+    target = decodeURIComponent(req.originalUrl.slice(3));
+  } catch {
+    return res.status(400).send("Invalid URL");
+  }
+
+  if (!target.startsWith("http")) {
+    return res.redirect("/");
+  }
+
   try {
     const response = await fetch(target, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Accept-Encoding": "identity",
-        "Upgrade-Insecure-Requests": "1",
-        "Referer": target
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "*/*"
       },
       redirect: "follow"
     });
+
     const ct = response.headers.get("content-type") || "";
     res.setHeader("Content-Type", ct);
-    res.removeHeader("x-frame-options");
-    res.removeHeader("content-security-policy");
+
     if (ct.includes("text/html")) {
       const html = await response.text();
-      res.send(rewriteHTML(html, target));
-    } else if (ct.includes("text/css")) {
-      const css = await response.text();
-      res.send(rewriteCSS(css, target));
-    } else {
-      response.body.pipe(res);
+      return res.send(rewriteHTML(html, target));
     }
+
+    if (ct.includes("text/css")) {
+      const css = await response.text();
+      return res.send(rewriteCSS(css, target));
+    }
+    return response.body.pipe(res);
   } catch (e) {
     res.status(500).send(`<!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"></head>
     <body style="font-family:'DM Sans',sans-serif;background:#080a0f;color:#e8eaf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
