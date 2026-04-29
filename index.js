@@ -35,9 +35,11 @@ function rewriteHTML(html, base) {
     // 🔥 ADD THIS (CRITICAL FIX FOR CSS)
     
     html = html.replace(
-    /<link([^>]+)href=["']([^"']+)["']/gi,
-    (m, attrs, href) => `<link${attrs}href="${toProxy(href, base)}"`
-    );
+  /<link\b([^>]*?)href\s*=\s*["']([^"']+)["']([^>]*)>/gi,
+  (m, before, href, after) => {
+    return `<link${before}href="${toProxy(href, base)}"${after}>`;
+  }
+);
 
     html = html.replace(/\ssrcset\s*=\s*"([^"]*)"/gi, (m, val) => {
     const rw = val.replace(/(https?:\/\/\S+)/g, u => toProxy(u, base));
