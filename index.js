@@ -18,145 +18,55 @@ function rewriteCSS(css, base) {
 }
 
 function rewriteHTML(html, base) {
-
-  // =========================
-  // 1. FORCE TITLE ON INITIAL LOAD
-  // =========================
-  html = html.replace(
-    /<title[^>]*>[\s\S]*?<\/title>/i,
-    "<title>Lens</title>"
-  );
-
-  // =========================
-  // 2. REWRITE BASIC ATTRIBUTES
-  // =========================
-  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*"([^"]*)"/gi,
-    (m, s, a, v) => `${s}${a}="${toProxy(v, base)}"`);
-
-  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*'([^']*)'/gi,
-    (m, s, a, v) => `${s}${a}='${toProxy(v, base)}'`);
-
+  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*"([^"]*)"/gi, (m, s, a, v) => `${s}${a}="${toProxy(v, base)}"`);
+  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*'([^']*)'/gi, (m, s, a, v) => `${s}${a}='${toProxy(v, base)}'`);
   html = html.replace(/\ssrcset\s*=\s*"([^"]*)"/gi, (m, val) => {
     const rw = val.replace(/(https?:\/\/\S+)/g, u => toProxy(u, base));
     return ` srcset="${rw}"`;
   });
+  html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, open, css, close) => open + rewriteCSS(css, base) + close);
 
-  html = html.replace(
-    /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
-    (m, open, css, close) => open + rewriteCSS(css, base) + close
-  );
-
-  // =========================
-  // 3. INJECT CLIENT SCRIPT (SPA SAFE)
-  // =========================
   const script = `<script>
 (function(){
-
   const BASE = "/p/";
   const target = decodeURIComponent(location.pathname.slice(BASE.length));
-
-  // =========================
-  // HISTORY
-  // =========================
   try {
     let h = JSON.parse(localStorage.getItem("ph") || "[]");
     h = h.filter(x => x.url !== target);
     h.unshift({ url: target, title: document.title || target, time: Date.now() });
     localStorage.setItem("ph", JSON.stringify(h.slice(0, 100)));
   } catch(e){}
-
-  // =========================
-  // FETCH PATCH
-  // =========================
   const _fetch = window.fetch;
   window.fetch = function(url, opts) {
-    try {
-      if (typeof url === "string" &&
-          !url.startsWith("/") &&
-          !url.startsWith("data:") &&
-          !url.startsWith("blob:")) {
-        url = BASE + new URL(url, target).href;
-      }
-    } catch(e){}
+    try { if (typeof url === "string" && !url.startsWith("/") && !url.startsWith("data:") && !url.startsWith("blob:")) url = BASE + new URL(url, target).href; } catch(e){}
     return _fetch(url, opts);
   };
-
-  // =========================
-  // XHR PATCH
-  // =========================
   const _open = XMLHttpRequest.prototype.open;
   XMLHttpRequest.prototype.open = function(m, url, ...r) {
-    try {
-      if (typeof url === "string" &&
-          !url.startsWith("/") &&
-          !url.startsWith("data:") &&
-          !url.startsWith("blob:")) {
-        url = BASE + new URL(url, target).href;
-      }
-    } catch(e){}
+    try { if (typeof url === "string" && !url.startsWith("/") && !url.startsWith("data:") && !url.startsWith("blob:")) url = BASE + new URL(url, target).href; } catch(e){}
     return _open.call(this, m, url, ...r);
   };
-
-  // =========================
-  // HISTORY PATCH
-  // =========================
   const _push = history.pushState;
   history.pushState = function(s, t, url) {
-    try {
-      if (url && !url.startsWith(BASE) && !url.startsWith("data:")) {
-        url = BASE + new URL(url, target).href;
-      }
-    } catch(e){}
+    try { if (url && !url.startsWith(BASE) && !url.startsWith("data:")) url = BASE + new URL(url, target).href; } catch(e){}
     return _push.call(this, s, t, url);
   };
-
   const _replace = history.replaceState;
   history.replaceState = function(s, t, url) {
-    try {
-      if (url && !url.startsWith(BASE) && !url.startsWith("data:")) {
-        url = BASE + new URL(url, target).href;
-      }
-    } catch(e){}
+    try { if (url && !url.startsWith(BASE) && !url.startsWith("data:")) url = BASE + new URL(url, target).href; } catch(e){}
     return _replace.call(this, s, t, url);
   };
-
-  // =========================
-  // TITLE OVERRIDE (SPA SAFE)
-  // =========================
-  const forceTitle = () => {
-    try {
-      Object.defineProperty(document, "title", {
-        get: () => "Lens",
-        set: () => {},
-        configurable: true
-      });
-
-      document.title = "Lens";
-    } catch(e){}
-
-    setInterval(() => {
-      if (document.title !== "Lens") {
-        document.title = "Lens";
-      }
-    }, 500);
-  };
-
-  forceTitle();
-
 })();
 </script>`;
 
-  // =========================
-  // 4. INJECT SCRIPT INTO PAGE
-  // =========================
   if (/<head[^>]*>/i.test(html)) {
     html = html.replace(/<head[^>]*>/i, m => m + script);
   } else {
     html = script + html;
   }
-
   return html;
 }
+
 app.get("/", (req, res) => {
   res.setHeader("Content-Type", "text/html");
   res.send(`<!DOCTYPE html>
