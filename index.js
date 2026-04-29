@@ -1,6 +1,10 @@
 const express = require("express");
 const fetch = require("node-fetch");
+
 const app = express();
+const NO_REWRITE = [
+  "reddit.com"
+];
 
 function toProxy(url, base) {
   if (!url || url.startsWith("data:") || url.startsWith("javascript:") || url.startsWith("blob:") || url.startsWith("#") || url.startsWith("mailto:")) return url;
@@ -475,32 +479,68 @@ app.use("/p/", async (req, res) => {
         "User-Agent": "Mozilla/5.0",
         "Accept": "*/*"
       },
-      redirect: "follow"
+      redirect: "manual"
     });
 
     const ct = response.headers.get("content-type") || "";
-    res.setHeader("Content-Type", ct);
 
+    // =========================
+    // 1. REDDIT / NO-REWRITE MODE
+    // =========================
+    if (NO_REWRITE.some(d => target.includes(d))) {
+      const location = response.headers.get("location");
+
+      if (location) {
+        return res.redirect(toProxy(location, target));
+      }
+
+      res.status(response.status);
+      res.setHeader("content-type", ct);
+      return response.body.pipe(res);
+    }
+
+    // =========================
+    // 2. HTML REWRITE
+    // =========================
     if (ct.includes("text/html")) {
       const html = await response.text();
       return res.send(rewriteHTML(html, target));
     }
 
+    // =========================
+    // 3. CSS REWRITE
+    // =========================
     if (ct.includes("text/css")) {
       const css = await response.text();
       return res.send(rewriteCSS(css, target));
     }
+
+    // =========================
+    // 4. EVERYTHING ELSE
+    // =========================
+    res.status(response.status);
+    res.setHeader("content-type", ct);
     return response.body.pipe(res);
+
   } catch (e) {
-    res.status(500).send(`<!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"></head>
-    <body style="font-family:'DM Sans',sans-serif;background:#080a0f;color:#e8eaf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
-      <div style="text-align:center;padding:40px">
-        <div style="font-size:48px;margin-bottom:20px">⚠️</div>
-        <h2 style="font-size:20px;margin-bottom:8px">Failed to load</h2>
-        <p style="color:rgba(255,255,255,0.35);font-size:14px;margin-bottom:24px">${e.message}</p>
-        <a href="/" style="color:#4f9eff;text-decoration:none;font-size:14px;padding:10px 20px;border:1px solid rgba(79,158,255,0.3);border-radius:10px">← Back to Lens</a>
-      </div>
-    </body></html>`);
+    console.error("Proxy error:", e);
+
+    res.status(500).send(`<!DOCTYPE html>
+<html>
+<head>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body style="font-family:'DM Sans',sans-serif;background:#080a0f;color:#e8eaf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
+  <div style="text-align:center;padding:40px">
+    <div style="font-size:48px;margin-bottom:20px">⚠️</div>
+    <h2 style="font-size:20px;margin-bottom:8px">Failed to load</h2>
+    <p style="color:rgba(255,255,255,0.35);font-size:14px;margin-bottom:24px">${e.message}</p>
+    <a href="/" style="color:#4f9eff;text-decoration:none;font-size:14px;padding:10px 20px;border:1px solid rgba(79,158,255,0.3);border-radius:10px">
+      ← Back to Lens
+    </a>
+  </div>
+</body>
+</html>`);
   }
 });
 
