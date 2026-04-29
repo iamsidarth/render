@@ -4,10 +4,21 @@ const app = express();
 
 
 function toProxy(url, base) {
-  if (!url || url.startsWith("data:") || url.startsWith("javascript:") || url.startsWith("blob:") || url.startsWith("#") || url.startsWith("mailto:")) return url;
+  if (
+    !url ||
+    url.startsWith("data:") ||
+    url.startsWith("javascript:") ||
+    url.startsWith("blob:") ||
+    url.startsWith("#") ||
+    url.startsWith("mailto:")
+  ) return url;
+
   try {
-    return "/p/" + new URL(url, base).href;
-  } catch { return url; }
+    const resolved = new URL(url, base).href;
+    return "/p/" + resolved;
+  } catch {
+    return url;
+  }
 }
 
 function rewriteCSS(css, base) {
@@ -15,15 +26,29 @@ function rewriteCSS(css, base) {
 }
 
 function rewriteHTML(html, base) {
-  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*"([^"]*)"/gi, (m, s, a, v) => `${s}${a}="${toProxy(v, base)}"`);
-  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*'([^']*)'/gi, (m, s, a, v) => `${s}${a}='${toProxy(v, base)}'`);
-  html = html.replace(/\ssrcset\s*=\s*"([^"]*)"/gi, (m, val) => {
+    html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*"([^"]*)"/gi,
+  (m, s, a, v) => `${s}${a}="${toProxy(v, base)}"`);
+
+    html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*'([^']*)'/gi,
+    (m, s, a, v) => `${s}${a}='${toProxy(v, base)}'`);
+
+    // 🔥 ADD THIS (CRITICAL FIX FOR CSS)
+    
+    html = html.replace(
+    /<link([^>]+)href=["']([^"']+)["']/gi,
+    (m, attrs, href) => `<link${attrs}href="${toProxy(href, base)}"`
+    );
+
+    html = html.replace(/\ssrcset\s*=\s*"([^"]*)"/gi, (m, val) => {
     const rw = val.replace(/(https?:\/\/\S+)/g, u => toProxy(u, base));
     return ` srcset="${rw}"`;
-  });
-  html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, open, css, close) => open + rewriteCSS(css, base) + close);
+    });
 
-  const script = `<script>
+    html = html.replace(
+    /(<style[^>]*>)([\s\S]*?)(<\/style>)/gi,
+    (m, open, css, close) => open + rewriteCSS(css, base) + close
+    );
+    const script = `<script>
 (function(){
   const BASE = "/p/";
   const target = decodeURIComponent(location.pathname.slice(BASE.length));
@@ -56,12 +81,12 @@ function rewriteHTML(html, base) {
 })();
 </script>`;
 
-  if (/<head[^>]*>/i.test(html)) {
-    html = html.replace(/<head[^>]*>/i, m => m + script);
-  } else {
-    html = script + html;
-  }
-  return html;
+    if (/<head[^>]*>/i.test(html)) {
+        html = html.replace(/<head[^>]*>/i, m => m + script);
+    } else {
+        html = script + html;
+    }
+    return html;
 }
 
 app.get("/", (req, res) => {
