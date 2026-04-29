@@ -1,365 +1,502 @@
 const express = require("express");
-const { createProxyMiddleware } = require("http-proxy-middleware");
-
+const fetch = require("node-fetch");
 const app = express();
-app.disable("x-powered-by");
 
-function escapeHtml(value = "") {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+function toProxy(url, base) {
+  if (!url || url.startsWith("data:") || url.startsWith("javascript:") || url.startsWith("blob:") || url.startsWith("#") || url.startsWith("mailto:")) return url;
+  try {
+    return "/p/" + new URL(url, base).href;
+  } catch { return url; }
 }
 
-function pageShell({ title }) {
-  return `<!doctype html>
-  <html lang="en">
-    <head>
-      <meta charset="utf-8" />
-      <meta name="viewport" content="width=device-width,initial-scale=1" />
-      <title>${escapeHtml(title)}</title>
-      <style>
-        :root {
-          color-scheme: dark;
-          --bg: #08111f;
-          --bg2: #0c1730;
-          --panel: rgba(9, 16, 31, 0.74);
-          --panel-border: rgba(159, 179, 255, 0.18);
-          --text: #edf3ff;
-          --muted: #9fb0d0;
-          --accent: #6ea8ff;
-          --shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-        }
-        * { box-sizing: border-box; }
-        body {
-          margin: 0;
-          font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-          color: var(--text);
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          background:
-            radial-gradient(circle at top left, rgba(110, 168, 255, 0.2), transparent 40%),
-            radial-gradient(circle at bottom right, rgba(157, 123, 255, 0.15), transparent 40%),
-            linear-gradient(160deg, var(--bg), var(--bg2));
-        }
-        body::before {
-          content: "";
-          position: fixed;
-          inset: 0;
-          pointer-events: none;
-          background-image:
-            linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
-          background-size: 45px 45px;
-          mask-image: radial-gradient(circle at center, black 30%, transparent 100%);
-          opacity: 0.4;
-        }
-        .container {
-          position: relative;
-          width: min(700px, 95%);
-          padding: 60px 40px;
-          background: var(--panel);
-          border: 1px solid var(--panel-border);
-          border-radius: 32px;
-          backdrop-filter: blur(24px);
-          box-shadow: var(--shadow);
-          text-align: center;
-          z-index: 10;
-        }
-        .eyebrow {
-          display: inline-block;
-          padding: 6px 14px;
-          border-radius: 99px;
-          background: rgba(110, 168, 255, 0.1);
-          color: var(--accent);
-          font-size: 12px;
-          font-weight: 600;
-          letter-spacing: 0.05em;
-          text-transform: uppercase;
-          margin-bottom: 20px;
-        }
-        h1 {
-          font-size: clamp(32px, 5vw, 48px);
-          margin: 0 0 16px;
-          letter-spacing: -0.04em;
-          background: linear-gradient(135deg, #fff 0%, #a8c8ff 100%);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
-        }
-        p { color: var(--muted); font-size: 17px; margin-bottom: 40px; }
-        .chips {
-          display: flex; gap: 8px; justify-content: center;
-          flex-wrap: wrap; margin-bottom: 28px;
-        }
-        .chip {
-          padding: 5px 14px; border-radius: 99px;
-          background: rgba(255,255,255,0.06);
-          border: 1px solid rgba(255,255,255,0.1);
-          color: var(--muted); font-size: 13px;
-          cursor: pointer; text-decoration: none;
-          transition: background .2s;
-        }
-        .chip:hover { background: rgba(110,168,255,0.15); color: var(--accent); }
-        .omnibox {
-          display: flex;
-          gap: 12px;
-          background: rgba(0, 0, 0, 0.3);
-          border: 1px solid rgba(255, 255, 255, 0.1);
-          padding: 10px;
-          border-radius: 20px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        .omnibox:focus-within {
-          border-color: var(--accent);
-          background: rgba(0, 0, 0, 0.4);
-          box-shadow: 0 0 0 4px rgba(110, 168, 255, 0.15);
-        }
-        input {
-          flex: 1;
-          background: transparent;
-          border: none;
-          color: white;
-          padding: 12px 16px;
-          font-size: 18px;
-          outline: none;
-        }
-        .btn-go {
-          background: linear-gradient(135deg, #6ea8ff, #9d7bff);
-          color: #08111f;
-          border: none;
-          padding: 0 32px;
-          border-radius: 14px;
-          font-weight: 700;
-          font-size: 16px;
-          cursor: pointer;
-          transition: transform 0.2s;
-        }
-        .btn-go:hover { transform: scale(1.05); }
-        .footer { margin-top: 32px; font-size: 13px; color: #5a6b8a; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="eyebrow">Cloud Proxy v2.0</div>
-        <h1>Portal</h1>
-        <div class="chips">
-          <a class="chip" href="/go?q=old.reddit.com">Reddit</a>
-          <a class="chip" href="/go?q=en.wikipedia.org">Wikipedia</a>
-          <a class="chip" href="/go?q=news.ycombinator.com">Hacker News</a>
-          <a class="chip" href="/go?q=lite.cnn.com">CNN Lite</a>
-        </div>
-        <p>Enter a URL (e.g. reddit.com) or a search query.</p>
-        <form action="/go" method="get" class="omnibox">
-          <input
-            type="text"
-            name="q"
-            placeholder="Type here..."
-            autocomplete="off"
-            autofocus
-            required
-          />
-          <button type="submit" class="btn-go">Go</button>
-        </form>
-        <div class="footer">Streaming &amp; Audio Enabled</div>
-      </div>
-    </body>
-  </html>`;
+function rewriteCSS(css, base) {
+  return css.replace(/url\(['"]?([^'")\s]+)['"]?\)/gi, (m, u) => `url("${toProxy(u, base)}")`);
 }
 
-app.get("/", (req, res) => res.send(pageShell({ title: "Secure Portal" })));
+function rewriteHTML(html, base) {
+  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*"([^"]*)"/gi, (m, s, a, v) => `${s}${a}="${toProxy(v, base)}"`);
+  html = html.replace(/(\s)(src|href|action|data-src)\s*=\s*'([^']*)'/gi, (m, s, a, v) => `${s}${a}='${toProxy(v, base)}'`);
+  html = html.replace(/\ssrcset\s*=\s*"([^"]*)"/gi, (m, val) => {
+    const rw = val.replace(/(https?:\/\/\S+)/g, u => toProxy(u, base));
+    return ` srcset="${rw}"`;
+  });
+  html = html.replace(/(<style[^>]*>)([\s\S]*?)(<\/style>)/gi, (m, open, css, close) => open + rewriteCSS(css, base) + close);
 
-app.get("/go", (req, res) => {
-  const query = String(req.query.q || "").trim();
-  if (!query) return res.redirect("/");
-
-  const isUrl = /^(https?:\/\/)|(localhost)|([a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,6}(:[0-9]{1,5})?(\/.*)?)$/i.test(query);
-
-  if (isUrl) {
-    const target = query.startsWith("http") ? query : `https://${query}`;
-    return res.redirect(`/proxy?url=${encodeURIComponent(target)}`);
-  } else {
-    // Use DuckDuckGo Lite — works through proxy, no JS required
-    const ddg = `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`;
-    return res.redirect(`/proxy?url=${encodeURIComponent(ddg)}`);
-  }
-});
-
-// Inject a small script into HTML pages so that link clicks and form
-// submissions stay inside the proxy instead of escaping to the real origin.
-function makeInjectedScript(proxyBase, pageOrigin) {
-  return `<script>
+  const script = `<script>
 (function(){
-  var BASE="${proxyBase}", ORIGIN="${pageOrigin}";
-  function wrap(u){
-    if(!u||/^(#|javascript:|blob:|data:)/i.test(u))return u;
-    try{ return BASE+"/proxy?url="+encodeURIComponent(new URL(u,ORIGIN).href); }
-    catch(e){ return u; }
-  }
-  // Intercept all clicks on <a> tags
-  document.addEventListener("click",function(e){
-    var a=e.target.closest("a[href]");
-    if(!a)return;
-    var h=a.getAttribute("href");
-    if(!h||/^(#|javascript:)/i.test(h))return;
-    e.preventDefault();
-    location.href=wrap(h);
-  },true);
-  // Intercept form submissions
-  document.addEventListener("submit",function(e){
-    var f=e.target, action=f.getAttribute("action")||"";
-    if(action&&!/^(#|javascript:)/i.test(action)) f.action=wrap(action);
-  },true);
+  const BASE = "/p/";
+  const target = decodeURIComponent(location.pathname.slice(BASE.length));
+  try {
+    let h = JSON.parse(localStorage.getItem("ph") || "[]");
+    h = h.filter(x => x.url !== target);
+    h.unshift({ url: target, title: document.title || target, time: Date.now() });
+    localStorage.setItem("ph", JSON.stringify(h.slice(0, 100)));
+  } catch(e){}
+  const _fetch = window.fetch;
+  window.fetch = function(url, opts) {
+    try { if (typeof url === "string" && !url.startsWith("/") && !url.startsWith("data:") && !url.startsWith("blob:")) url = BASE + new URL(url, target).href; } catch(e){}
+    return _fetch(url, opts);
+  };
+  const _open = XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open = function(m, url, ...r) {
+    try { if (typeof url === "string" && !url.startsWith("/") && !url.startsWith("data:") && !url.startsWith("blob:")) url = BASE + new URL(url, target).href; } catch(e){}
+    return _open.call(this, m, url, ...r);
+  };
+  const _push = history.pushState;
+  history.pushState = function(s, t, url) {
+    try { if (url && !url.startsWith(BASE) && !url.startsWith("data:")) url = BASE + new URL(url, target).href; } catch(e){}
+    return _push.call(this, s, t, url);
+  };
+  const _replace = history.replaceState;
+  history.replaceState = function(s, t, url) {
+    try { if (url && !url.startsWith(BASE) && !url.startsWith("data:")) url = BASE + new URL(url, target).href; } catch(e){}
+    return _replace.call(this, s, t, url);
+  };
 })();
 </script>`;
+
+  if (/<head[^>]*>/i.test(html)) {
+    html = html.replace(/<head[^>]*>/i, m => m + script);
+  } else {
+    html = script + html;
+  }
+  return html;
 }
 
-app.use("/proxy", (req, res, next) => {
-  const rawTarget = req.query.url;
-  if (!rawTarget) return res.status(400).send("No URL provided.");
+app.get("/", (req, res) => {
+  res.setHeader("Content-Type", "text/html");
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lens</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #080a0f;
+      --surface: rgba(255,255,255,0.04);
+      --surface-hover: rgba(255,255,255,0.07);
+      --border: rgba(255,255,255,0.07);
+      --accent: #4f9eff;
+      --accent-glow: rgba(79,158,255,0.25);
+      --text: #e8eaf0;
+      --muted: rgba(255,255,255,0.35);
+      --danger: #ff5f5f;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { height: 100%; }
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
 
-  let targetUrl;
-  try {
-    targetUrl = new URL(rawTarget);
-  } catch (e) {
-    return res.status(400).send("Invalid URL.");
-  }
+    /* Ambient background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -30%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 500px;
+      background: radial-gradient(ellipse, rgba(79,158,255,0.07) 0%, transparent 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
 
-  // For reddit.com page requests, rewrite to old.reddit.com
-  // Leave CDN hosts (redditstatic.com, redd.it, redditmedia.com) untouched
-  const host = targetUrl.hostname;
-  const isRedditPage =
-    host === "reddit.com" ||
-    host === "www.reddit.com" ||
-    host === "old.reddit.com" ||
-    host === "oauth.reddit.com";
+    /* Top bar */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 14px 20px;
+      background: rgba(8,10,15,0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
 
-  if (isRedditPage) {
-    targetUrl.hostname = "old.reddit.com";
-  }
+    .logo {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: var(--text);
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .logo-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--accent);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; box-shadow: 0 0 10px var(--accent); }
+      50% { opacity: 0.6; box-shadow: 0 0 4px var(--accent); }
+    }
 
-  const proxyBase = `${req.protocol}://${req.get("host")}`;
-  const pageOrigin = targetUrl.origin;
+    .search-wrap {
+      flex: 1;
+      position: relative;
+      max-width: 680px;
+    }
+    .search-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      font-size: 14px;
+      pointer-events: none;
+    }
+    .search-wrap input {
+      width: 100%;
+      padding: 11px 16px 11px 40px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
+    }
+    .search-wrap input::placeholder { color: var(--muted); font-family: 'DM Sans', sans-serif; }
+    .search-wrap input:focus {
+      border-color: var(--accent);
+      background: rgba(79,158,255,0.05);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
 
-  const proxy = createProxyMiddleware({
-    target: targetUrl.origin,
-    changeOrigin: true,
-    followRedirects: false, // we handle redirects ourselves below
-    secure: false,
-    logLevel: "silent",
-    pathRewrite: () => `${targetUrl.pathname}${targetUrl.search}`,
+    .go-btn {
+      padding: 11px 22px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 12px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 0 20px var(--accent-glow);
+      white-space: nowrap;
+    }
+    .go-btn:hover { opacity: 0.88; box-shadow: 0 0 30px var(--accent-glow); }
+    .go-btn:active { transform: scale(0.97); }
 
-    on: {
-      proxyReq: (proxyReq) => {
-        // Spoof headers so sites don't block us as a bot
-        proxyReq.setHeader("host", targetUrl.hostname);
-        proxyReq.setHeader("user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
-        proxyReq.setHeader("accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8");
-        proxyReq.setHeader("accept-language", "en-US,en;q=0.9");
-        proxyReq.setHeader("sec-fetch-dest", "document");
-        proxyReq.setHeader("sec-fetch-mode", "navigate");
-        proxyReq.setHeader("sec-fetch-site", "none");
-        proxyReq.removeHeader("x-forwarded-for");
-        proxyReq.removeHeader("x-forwarded-host");
-        proxyReq.removeHeader("x-forwarded-proto");
-      },
+    /* Main content */
+    .main {
+      position: relative;
+      z-index: 1;
+      max-width: 740px;
+      margin: 0 auto;
+      padding: 40px 20px 60px;
+    }
 
-      proxyRes: (proxyRes, req2, res2) => {
-        // Strip headers that break embedding
-        delete proxyRes.headers["content-security-policy"];
-        delete proxyRes.headers["content-security-policy-report-only"];
-        delete proxyRes.headers["x-frame-options"];
-        delete proxyRes.headers["strict-transport-security"];
+    /* Quick access chips */
+    .quick-label {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      margin-bottom: 10px;
+    }
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 40px;
+    }
+    .chip {
+      padding: 7px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      user-select: none;
+    }
+    .chip:hover {
+      background: var(--surface-hover);
+      color: var(--text);
+      border-color: rgba(255,255,255,0.15);
+    }
 
-        // Allow cross-origin media
-        proxyRes.headers["access-control-allow-origin"] = "*";
+    /* Section header */
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .section-title {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+    }
+    .clear-btn {
+      font-size: 12px;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 4px 10px;
+      border-radius: 6px;
+      transition: all 0.15s;
+      border: 1px solid transparent;
+    }
+    .clear-btn:hover {
+      color: var(--danger);
+      border-color: rgba(255,95,95,0.2);
+      background: rgba(255,95,95,0.06);
+    }
 
-        // Fix cookies — remove Secure/SameSite so they survive HTTP proxy
-        if (proxyRes.headers["set-cookie"]) {
-          proxyRes.headers["set-cookie"] = proxyRes.headers["set-cookie"].map(c =>
-            c.replace(/;\s*secure/gi, "").replace(/;\s*samesite=[^;]*/gi, "")
-          );
+    /* History list */
+    .hist-list { display: flex; flex-direction: column; gap: 6px; }
+
+    .hist-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 13px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      animation: fadeUp 0.3s ease both;
+      text-decoration: none;
+      color: inherit;
+    }
+    .hist-item:hover {
+      background: var(--surface-hover);
+      border-color: rgba(255,255,255,0.12);
+      transform: translateY(-1px);
+    }
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .hist-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: rgba(79,158,255,0.1);
+      border: 1px solid rgba(79,158,255,0.15);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .hist-info { flex: 1; min-width: 0; }
+    .hist-title {
+      font-size: 14px;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 2px;
+    }
+    .hist-url {
+      font-size: 12px;
+      font-family: 'DM Mono', monospace;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hist-time {
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 36px; margin-bottom: 14px; opacity: 0.4; }
+    .empty-state p { font-size: 14px; line-height: 1.6; }
+
+    /* Loading bar */
+    #loadbar {
+      position: fixed;
+      top: 0; left: 0;
+      height: 2px;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+      width: 0%;
+      transition: width 0.3s ease;
+      z-index: 9999;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="loadbar"></div>
+
+  <div class="topbar">
+    <div class="logo">
+      <div class="logo-dot"></div>
+      Lens
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="u" type="text" placeholder="Search or enter a URL" onkeydown="if(event.key==='Enter')go()"/>
+    </div>
+    <button class="go-btn" onclick="go()">Go →</button>
+  </div>
+
+  <div class="main">
+    <div class="quick-label">Quick Access</div>
+    <div class="chips">
+      <div class="chip" onclick="nav('https://google.com')">🔍 Google</div>
+      <div class="chip" onclick="nav('https://reddit.com')">🟠 Reddit</div>
+      <div class="chip" onclick="nav('https://youtube.com')">▶ YouTube</div>
+      <div class="chip" onclick="nav('https://github.com')">🐙 GitHub</div>
+      <div class="chip" onclick="nav('https://wikipedia.org')">📖 Wikipedia</div>
+      <div class="chip" onclick="nav('https://news.ycombinator.com')">🔶 HN</div>
+    </div>
+
+    <div class="section-header">
+      <span class="section-title">Recent History</span>
+      <span class="clear-btn" onclick="clearH()">Clear all</span>
+    </div>
+    <div class="hist-list" id="hist"></div>
+  </div>
+
+  <script>
+    function nav(url) {
+      startLoad();
+      window.location.href = "/p/" + url;
+    }
+    function go() {
+      let v = document.getElementById("u").value.trim();
+      if (!v) return;
+      if (v.includes(" ") || !v.includes(".")) {
+        v = "https://www.google.com/search?q=" + encodeURIComponent(v);
+      } else {
+        if (!v.startsWith("http")) v = "https://" + v;
+      }
+      startLoad();
+      window.location.href = "/p/" + v;
+    }
+    function startLoad() {
+      const bar = document.getElementById("loadbar");
+      bar.style.display = "block";
+      bar.style.width = "70%";
+    }
+    function relTime(ts) {
+      const d = Date.now() - ts;
+      if (d < 60000) return "just now";
+      if (d < 3600000) return Math.floor(d/60000) + "m ago";
+      if (d < 86400000) return Math.floor(d/3600000) + "h ago";
+      return Math.floor(d/86400000) + "d ago";
+    }
+    function getDomain(url) {
+      try { return new URL(url).hostname.replace("www.", ""); } catch { return url; }
+    }
+    function getEmoji(url) {
+      const d = getDomain(url);
+      if (d.includes("google")) return "🔍";
+      if (d.includes("reddit")) return "🟠";
+      if (d.includes("youtube")) return "▶";
+      if (d.includes("github")) return "🐙";
+      if (d.includes("wiki")) return "📖";
+      if (d.includes("twitter") || d.includes("x.com")) return "✖";
+      if (d.includes("news.ycombinator")) return "🔶";
+      return "🌐";
+    }
+    function loadH() {
+      try {
+        const h = JSON.parse(localStorage.getItem("ph") || "[]");
+        const el = document.getElementById("hist");
+        if (!h.length) {
+          el.innerHTML = \`<div class="empty-state"><div class="icon">🌐</div><p>No history yet.<br>Enter a URL or pick a quick access site above.</p></div>\`;
+          return;
         }
-
-        // Rewrite redirect Location to stay inside proxy
-        const loc = proxyRes.headers["location"];
-        if (loc) {
-          let abs = loc;
-          if (abs.startsWith("//")) abs = `${targetUrl.protocol}${abs}`;
-          else if (abs.startsWith("/")) abs = `${pageOrigin}${abs}`;
-          else if (!/^https?:\/\//i.test(abs)) abs = `${pageOrigin}/${abs}`;
-          proxyRes.headers["location"] = `${proxyBase}/proxy?url=${encodeURIComponent(abs)}`;
-        }
-
-        const ct = (proxyRes.headers["content-type"] || "").toLowerCase();
-        const isHtml = ct.includes("text/html");
-
-        if (!isHtml) return; // let http-proxy-middleware stream binary as-is
-
-        // For HTML we need to buffer, rewrite src/href/action, inject script
-        const zlib = require("zlib");
-        const enc = proxyRes.headers["content-encoding"];
-
-        delete proxyRes.headers["content-encoding"];
-        delete proxyRes.headers["content-length"];
-
-        let stream = proxyRes;
-        if (enc === "gzip")    stream = proxyRes.pipe(zlib.createGunzip());
-        else if (enc === "deflate") stream = proxyRes.pipe(zlib.createInflate());
-        else if (enc === "br") stream = proxyRes.pipe(zlib.createBrotliDecompress());
-
-        const chunks = [];
-        stream.on("data", c => chunks.push(c));
-        stream.on("end", () => {
-          let html = Buffer.concat(chunks).toString("utf8");
-
-          // Rewrite absolute src/href/action pointing anywhere → proxy
-          html = html.replace(
-            /((?:src|href|action|data-src)\s*=\s*)(["'])(https?:\/\/[^"']+)\2/gi,
-            (_, attr, q, url) => `${attr}${q}${proxyBase}/proxy?url=${encodeURIComponent(url)}${q}`
-          );
-
-          // Rewrite protocol-relative //domain.com/path → proxy
-          html = html.replace(
-            /((?:src|href|action)\s*=\s*["'])(\/\/[a-z0-9][^"']+)(["'])/gi,
-            (_, pre, url, post) => `${pre}${proxyBase}/proxy?url=${encodeURIComponent("https:" + url)}${post}`
-          );
-
-          // Rewrite root-relative /path → proxy (using current page origin)
-          html = html.replace(
-            /((?:src|href|action)\s*=\s*["'])(\/(?!\/)[^"']*)(["'])/gi,
-            (_, pre, path, post) => `${pre}${proxyBase}/proxy?url=${encodeURIComponent(pageOrigin + path)}${post}`
-          );
-
-          // Inject navigation intercept script
-          const script = makeInjectedScript(proxyBase, pageOrigin);
-          if (html.includes("</body>")) {
-            html = html.replace("</body>", script + "</body>");
-          } else {
-            html += script;
-          }
-
-          res2.writeHead(proxyRes.statusCode, proxyRes.headers);
-          res2.end(html, "utf8");
-        });
-
-        stream.on("error", err => {
-          if (!res2.headersSent) res2.status(502).send("Stream error: " + err.message);
-        });
-      },
-
-      error: (err, req2, res2) => {
-        console.error("Proxy error:", err.message);
-        if (!res2.headersSent) res2.status(502).send(`Could not reach target: ${err.message}`);
-      },
-    },
-  });
-
-  return proxy(req, res, next);
+        el.innerHTML = h.map((x, i) => \`
+          <div class="hist-item" style="animation-delay:\${i * 40}ms" onclick="nav(\${JSON.stringify(x.url)})">
+            <div class="hist-icon">\${getEmoji(x.url)}</div>
+            <div class="hist-info">
+              <div class="hist-title">\${x.title || getDomain(x.url)}</div>
+              <div class="hist-url">\${getDomain(x.url)}</div>
+            </div>
+            <div class="hist-time">\${relTime(x.time)}</div>
+          </div>
+        \`).join("");
+      } catch(e) {}
+    }
+    function clearH() {
+      localStorage.removeItem("ph");
+      loadH();
+    }
+    loadH();
+  </script>
+</body>
+</html>`);
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, "0.0.0.0", () => console.log(`Engine Ready on ${port}`));
+app.use("/p/*", async (req, res) => {
+  const path = req.path.slice(3);
+  const qs = req.url.slice(req.path.length);
+  const target = path + qs;
+  if (!target) return res.redirect("/");
+  try {
+    const response = await fetch(target, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Accept-Encoding": "identity",
+        "Upgrade-Insecure-Requests": "1",
+        "Referer": target
+      },
+      redirect: "follow"
+    });
+    const ct = response.headers.get("content-type") || "";
+    res.setHeader("Content-Type", ct);
+    res.removeHeader("x-frame-options");
+    res.removeHeader("content-security-policy");
+    if (ct.includes("text/html")) {
+      const html = await response.text();
+      res.send(rewriteHTML(html, target));
+    } else if (ct.includes("text/css")) {
+      const css = await response.text();
+      res.send(rewriteCSS(css, target));
+    } else {
+      response.body.pipe(res);
+    }
+  } catch (e) {
+    res.status(500).send(`<!DOCTYPE html><html><head><link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet"></head>
+    <body style="font-family:'DM Sans',sans-serif;background:#080a0f;color:#e8eaf0;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
+      <div style="text-align:center;padding:40px">
+        <div style="font-size:48px;margin-bottom:20px">⚠️</div>
+        <h2 style="font-size:20px;margin-bottom:8px">Failed to load</h2>
+        <p style="color:rgba(255,255,255,0.35);font-size:14px;margin-bottom:24px">${e.message}</p>
+        <a href="/" style="color:#4f9eff;text-decoration:none;font-size:14px;padding:10px 20px;border:1px solid rgba(79,158,255,0.3);border-radius:10px">← Back to Lens</a>
+      </div>
+    </body></html>`);
+  }
+});
+
+app.listen(process.env.PORT || 3000);
